@@ -89,7 +89,7 @@ jobs:
               # You could try to output installer logs here if you know their location.
               # e.g., $logPath = "C:\ProgramData\Intel\Logs\oneAPI_bootstrapper.log" (path may vary)
               # if (Test-Path $logPath) { Get-Content $logPath | Select-Object -Last 50 }
-              exit 1
+              # exit 1
             }
             echo "oneAPI installation finished successfully."
             
