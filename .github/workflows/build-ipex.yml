@@ -23,6 +23,59 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: List oneAPI Components (then fail)
+        id: list_oneapi_components
+        run: |
+          echo "Attempting to download Intel oneAPI Base Toolkit to list components..."
+          $ProgressPreference = 'SilentlyContinue'
+          $InstallerUrl = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe"
+          $InstallerPath = "C:\temp\oneapi_installer.exe"
+          
+          New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
+          echo "Downloading oneAPI Base Toolkit installer from $InstallerUrl..."
+          try {
+            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
+            echo "Installer downloaded."
+
+            echo "Listing components from installer:"
+            # Command to list components based on Intel's documentation
+            $listComponentsArgs = "-s -a --list-components"
+            echo "Running: $InstallerPath $listComponentsArgs"
+            
+            # Execute and capture output
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = $InstallerPath
+            $processInfo.Arguments = $listComponentsArgs
+            $processInfo.RedirectStandardOutput = $true
+            $processInfo.RedirectStandardError = $true
+            $processInfo.UseShellExecute = $false
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $processInfo
+            $process.Start() | Out-Null # Start the process
+            # Wait for the process to exit, and capture output.
+            # May need a timeout if the process hangs, but --list-components should be quick.
+            $process.WaitForExit() 
+            
+            $output = $process.StandardOutput.ReadToEnd()
+            $errorOutput = $process.StandardError.ReadToEnd()
+            
+            echo "--- Component List Output (Exit Code: $($process.ExitCode)) ---"
+            echo $output
+            if (-not [string]::IsNullOrWhiteSpace($errorOutput)) {
+              echo "--- Component List Error Output ---"
+              echo $errorOutput
+            }
+            echo "-------------------------------------"
+            
+            echo "Workflow will now fail to allow inspection of component list from the logs."
+            exit 1 # Force fail to inspect logs
+
+          } catch {
+            echo "::error::Failed to download or run oneAPI installer for listing components: $($_.Exception.Message)"
+            exit 1 # Also fail if download fails
+          }
+        shell: powershell
+
       - name: Install Intel oneAPI Base Toolkit
         id: install_oneapi
         run: |
