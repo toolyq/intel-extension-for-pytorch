@@ -23,59 +23,65 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Intel oneAPI Base Toolkit (Conceptual)
+      - name: Install Intel oneAPI Base Toolkit
         id: install_oneapi
         run: |
           echo "Attempting to download and install Intel oneAPI Base Toolkit..."
-          $ProgressPreference = 'SilentlyContinue' # For cleaner logs
+          $ProgressPreference = 'SilentlyContinue'
           # IMPORTANT: Replace this URL with the actual, stable download link for the oneAPI Base Toolkit offline installer
-          $InstallerUrl = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe"
+          $InstallerUrl = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe" 
           $InstallerPath = "C:\temp\oneapi_installer.exe"
-          $InstallDir = "C:\Program Files (x86)\Intel\oneAPI"
+          $InstallDir = "C:\Program Files (x86)\Intel\oneAPI" # Default, used for setvars.bat path
 
-          # Check if already installed
+          # Check if already installed (e.g., from a cached runner)
           if (Test-Path "$InstallDir\setvars.bat") {
-            echo "oneAPI seems to be already installed. Skipping download/installation."
+            echo "oneAPI seems to be already installed (found setvars.bat). Skipping download/installation."
             echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             exit 0
           }
 
           New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
-          echo "Downloading oneAPI Base Toolkit installer..."
+          echo "Downloading oneAPI Base Toolkit installer from $InstallerUrl..."
           try {
-            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
-            echo "Installer downloaded. Starting silent installation..."
-            # IMPORTANT: You MUST find the correct silent installation flags for the Intel oneAPI installer.
-            # The flags below are placeholders and may not work. Refer to Intel's documentation.
-
-            # THIS IS A CRITICAL PLACEHOLDER - REPLACE WITH CORRECT SILENT INSTALL COMMAND
-            # Write-Error "Placeholder for oneAPI silent install. Update this step with correct command and arguments."
-            # Example (must be verified):
-            # & $InstallerPath accept --silent --eula=accept --installdir="\$InstallDir" --disable-vs-integration --components="intel.oneapi.lin.dpcpp_compiler_and_libraries"
-            & $InstallerPath  -s -a --silent --eula accept
-
-            # Simulate placeholder failure for now if URL not replaced
+            # Ensure you have a valid URL above
             if ($InstallerUrl -eq "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") {
-                echo "::error::Installer URL not replaced. Halting."
+                echo "::error::Installer URL is still the placeholder. Please update it in the workflow file."
                 exit 1
             }
-            # Actual install command would go here, e.g.:
-            # Start-Process -FilePath $InstallerPath -ArgumentList "accept --silent --eula=accept --installdir=""$InstallDir"" --product=default" -Wait -NoNewWindow
+            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
+            echo "Installer downloaded. Starting silent installation..."
 
-
+            # Command based on Intel's documentation:
+            # -s for the extractor, -a to pass args to installer
+            # --silent for installer, --eula accept is required
+            # --components: intel.oneapi.win.dpcpp-compiler (guess), intel.oneapi.win.mkl (guess), intel.oneapi.win.tbb.devel (from docs)
+            # -p=NEED_VS2022_INTEGRATION=0 to skip VS integration with VS 2022 (GitHub runner default)
+            # NOTE: The exact component IDs for DPC++ and MKL might need verification if the build fails later.
+            #       You can get a list via: $InstallerPath -s -a --list-components
+            $oneApiArgs = "-s -a --silent --eula accept --components=intel.oneapi.win.dpcpp-compiler:intel.oneapi.win.mkl:intel.oneapi.win.tbb.devel -p=NEED_VS2022_INTEGRATION=0"
+            
+            echo "Running installer with arguments: $oneApiArgs"
+            Start-Process -FilePath $InstallerPath -ArgumentList $oneApiArgs -Wait -NoNewWindow
+            
             if ($LASTEXITCODE -ne 0) {
-              echo "::error::oneAPI installation failed with exit code $LASTEXITCODE"
+              echo "::error::oneAPI installation failed with exit code $LASTEXITCODE."
+              # You could try to output installer logs here if you know their location.
+              # e.g., $logPath = "C:\ProgramData\Intel\Logs\oneAPI_bootstrapper.log" (path may vary)
+              # if (Test-Path $logPath) { Get-Content $logPath | Select-Object -Last 50 }
               exit 1
             }
-            echo "oneAPI installation finished."
+            echo "oneAPI installation finished successfully."
+            
+            # Verify setvars.bat exists after installation
             if (Test-Path "$InstallDir\setvars.bat") {
               echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             } else {
-              echo "::error::setvars.bat not found after oneAPI installation from $InstallDir. Searched for $InstallDir\setvars.bat"
+              echo "::error::setvars.bat not found at $InstallDir\setvars.bat after oneAPI installation."
+              echo "Please check the installation directory and if the correct components providing setvars.bat were installed."
               exit 1
             }
           } catch {
-            echo "::error::Failed to download or install oneAPI: $($_.Exception.Message)"
+            echo "::error::Failed to download or run oneAPI installer: $($_.Exception.Message)"
             exit 1
           }
         shell: powershell
