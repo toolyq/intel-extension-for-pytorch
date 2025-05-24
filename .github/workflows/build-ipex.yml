@@ -107,7 +107,7 @@ jobs:
       - name: Install Python Build Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install wheel setuptools ninja psutil packaging
+          pip install wheel setuptools ninja psutil packaging PyYAML
           echo "Installing PyTorch 2.7.0 CPU version..."
           pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
