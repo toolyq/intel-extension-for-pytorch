@@ -12,28 +12,52 @@ jobs:
         shell: powershell # Using PowerShell for better scripting on Windows
 
     steps:
+      - name: Define oneAPI Variables
+        id: oneapi_vars
+        run: |
+          # IMPORTANT: Keep this URL updated if you change oneAPI versions
+          $InstallerUrl = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe"
+          $InstallDir = "C:\Program Files (x86)\Intel\oneAPI"
+          # Create a version string from the URL or hardcode it for the cache key
+          # This helps ensure the cache is specific to this version of oneAPI
+          $OneApiVersionKey = "2025.1.3.8" # Or extract programmatically if URL structure is consistent
+          echo "installer_url=$InstallerUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo "install_dir=$InstallDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          echo "oneapi_version_key=$OneApiVersionKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        shell: powershell
+
+      - name: Cache Intel oneAPI Installation
+        id: cache-oneapi
+        uses: actions/cache@v4
+        with:
+          # Path to cache
+          path: ${{ steps.oneapi_vars.outputs.install_dir }}
+          # Cache key: unique for OS, oneAPI version.
+          # If workflow file changes how oneAPI is installed, this key will change, busting the cache.
+          key: ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}-${{ hashFiles('**/workflow.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}-
 
       - name: Install Intel oneAPI Base Toolkit
         id: install_oneapi
         run: |
-          echo "Attempting to download and install Intel oneAPI Base Toolkit..."
-          $ProgressPreference = 'SilentlyContinue'
-          # IMPORTANT: Replace this URL with the actual, stable download link for the oneAPI Base Toolkit offline installer
-          $InstallerUrl = "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe" 
+          $InstallerUrl = "${{ steps.oneapi_vars.outputs.installer_url }}"
           $InstallerPath = "C:\temp\oneapi_installer.exe"
-          $InstallDir = "C:\Program Files (x86)\Intel\oneAPI" # Default, used for setvars.bat path
+          $InstallDir = "${{ steps.oneapi_vars.outputs.install_dir }}"
 
-          # Check if already installed (e.g., from a cached runner)
+          # Check if already installed (e.g., from a restored cache)
+          # The actions/cache step runs before this. If it restored successfully, setvars.bat should exist.
           if (Test-Path "$InstallDir\setvars.bat") {
-            echo "oneAPI seems to be already installed (found setvars.bat). Skipping download/installation."
+            echo "oneAPI seems to be already installed (found setvars.bat at $InstallDir). Assuming from cache."
             echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            exit 0
+            exit 0 # Important: Exit successfully if found, skipping download/install
           }
 
+          echo "oneAPI not found or cache miss. Attempting to download and install Intel oneAPI Base Toolkit..."
+          $ProgressPreference = 'SilentlyContinue'
           New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
           echo "Downloading oneAPI Base Toolkit installer from $InstallerUrl..."
           try {
-            # Ensure you have a valid URL above
             if ($InstallerUrl -eq "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") {
                 echo "::error::Installer URL is still the placeholder. Please update it in the workflow file."
                 exit 1
@@ -41,64 +65,25 @@ jobs:
             Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
             echo "Installer downloaded. Starting silent installation..."
 
-            echo "----------------------------Listing components from installer:"
-            # Command to list components based on Intel's documentation
-            $listComponentsArgs = "-s -a --list-components"
-            echo "Running: $InstallerPath $listComponentsArgs"
-            
-            # Execute and capture output
-            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-            $processInfo.FileName = $InstallerPath
-            $processInfo.Arguments = $listComponentsArgs
-            $processInfo.RedirectStandardOutput = $true
-            $processInfo.RedirectStandardError = $true
-            $processInfo.UseShellExecute = $false
-            $process = New-Object System.Diagnostics.Process
-            $process.StartInfo = $processInfo
-            $process.Start() | Out-Null # Start the process
-            # Wait for the process to exit, and capture output.
-            # May need a timeout if the process hangs, but --list-components should be quick.
-            $process.WaitForExit() 
-            
-            $output = $process.StandardOutput.ReadToEnd()
-            $errorOutput = $process.StandardError.ReadToEnd()
-            
-            echo "--- Component List Output (Exit Code: $($process.ExitCode)) ---"
-            echo $output
-            if (-not [string]::IsNullOrWhiteSpace($errorOutput)) {
-              echo "--- Component List Error Output ---"
-              echo $errorOutput
-            }
-            echo "-------------------------------------"
+            # (Your existing --list-components logic can remain here if needed for debugging,
+            # but for caching, it's less critical if the install is skipped)
 
-            # Command based on Intel's documentation:
-            # -s for the extractor, -a to pass args to installer
-            # --silent for installer, --eula accept is required
-            # --components: intel.oneapi.win.dpcpp-compiler (guess), intel.oneapi.win.mkl (guess), intel.oneapi.win.tbb.devel (from docs)
-            # -p=NEED_VS2022_INTEGRATION=0 to skip VS integration with VS 2022 (GitHub runner default)
-            # NOTE: The exact component IDs for DPC++ and MKL might need verification if the build fails later.
-            #       You can get a list via:  $InstallerPath -s -a --list-components
             $targetComponents = "intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.tbb.devel"
-            $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0"
+            $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0 --install-dir=""$InstallDir""" # Ensure install-dir is used
             
             echo "Running installer with arguments: $oneApiArgs"
             Start-Process -FilePath $InstallerPath -ArgumentList $oneApiArgs -Wait -NoNewWindow
             
             if ($LASTEXITCODE -ne 0) {
               echo "::error::oneAPI installation failed with exit code $LASTEXITCODE."
-              # You could try to output installer logs here if you know their location.
-              # e.g., $logPath = "C:\ProgramData\Intel\Logs\oneAPI_bootstrapper.log" (path may vary)
-              # if (Test-Path $logPath) { Get-Content $logPath | Select-Object -Last 50 }
-              # exit 1
+              exit 1
             }
             echo "oneAPI installation finished successfully."
             
-            # Verify setvars.bat exists after installation
             if (Test-Path "$InstallDir\setvars.bat") {
               echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             } else {
               echo "::error::setvars.bat not found at $InstallDir\setvars.bat after oneAPI installation."
-              echo "Please check the installation directory and if the correct components providing setvars.bat were installed."
               exit 1
             }
           } catch {
@@ -110,8 +95,8 @@ jobs:
       - name: Checkout IPEX Repository
         uses: actions/checkout@v4
         with:
-          repository: 'intel/intel-extension-for-pytorch' # 使用官方仓库
-          ref: 'release/xpu/2.7.10' # 指定这个分支
+          repository: 'intel/intel-extension-for-pytorch' # Using official repo as per previous discussion
+          ref: 'release/xpu/2.7.10'                   # Using the agreed-upon ref
           submodules: 'recursive'
 
       - name: Set up Python 3.10
@@ -132,10 +117,14 @@ jobs:
           PYTHONIOENCODING: "UTF-8"
           PYTHONUTF8: "1"
         run: |
+          # This step's output is critical. It will be set by the 'Install Intel oneAPI' step
+          # whether oneAPI was found in cache or freshly installed.
           $SetvarsPath = "${{ steps.install_oneapi.outputs.setvars_path }}"
+
           if (-not $SetvarsPath -or !(Test-Path $SetvarsPath)) {
             echo "::error::setvars.bat path ('$SetvarsPath') not found or not valid from previous step."
-            $DefaultSetvarsPath = "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+            # As a fallback, you could try the default again, but ideally, the install_oneapi step handles this.
+            $DefaultSetvarsPath = "${{ steps.oneapi_vars.outputs.install_dir }}\setvars.bat"
             echo "Trying default Intel oneAPI setvars.bat path: $DefaultSetvarsPath"
             if (Test-Path $DefaultSetvarsPath) {
               $SetvarsPath = $DefaultSetvarsPath
@@ -158,11 +147,6 @@ jobs:
           echo Environment initialized. Starting Python build for IPEX...
 
           set USE_NINJA=1
-          REM CMAKE_GENERATOR_PLATFORM=x64 通常由 setvars.bat intel64 vs2022 自动处理，或者不需要显式设置。
-          REM 如果遇到 CMake 找不到编译器或生成器的问题，可以尝试：
-          REM set CMAKE_ARGS="-DCMAKE_GENERATOR_PLATFORM=x64"
-          REM 但一般情况下，仅仅设置 USE_NINJA=1 就足够了。
-
           python setup.py bdist_wheel
           if %errorlevel% neq 0 (
             echo ::error::Python build (setup.py bdist_wheel) failed. Exit code: %errorlevel%
@@ -184,6 +168,7 @@ jobs:
             exit 1
           }
           echo "Build process completed via batch script."
+        shell: powershell
 
       - name: Upload Wheel Artifact
         uses: actions/upload-artifact@v4
