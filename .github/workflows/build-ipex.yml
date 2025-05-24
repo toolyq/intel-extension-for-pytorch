@@ -55,7 +55,7 @@ jobs:
             & $InstallerPath  -s -a --silent --eula accept
 
             # Simulate placeholder failure for now if URL not replaced
-            if ($InstallerUrl -eq "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/e5785fb3-b5a7-4b97-89bc-918adab1f77d/intel-oneapi-base-toolkit-2025.1.3.8_offline.exe") {
+            if ($InstallerUrl -eq "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") {
                 echo "::error::Installer URL not replaced. Halting."
                 exit 1
             }
