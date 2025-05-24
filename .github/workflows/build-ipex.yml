@@ -148,8 +148,8 @@ jobs:
 
           $ScriptContent = @"
           @echo off
-          echo Calling "%SETVARS_PATH%" intel64 vs2022...
-          call "%SETVARS_PATH%" intel64 vs2022
+          echo Calling "$($SetvarsPath)" intel64 vs2022...
+          call "$($SetvarsPath)" intel64 vs2022
           if %errorlevel% neq 0 (
             echo ::error::Failed to initialize oneAPI environment using setvars.bat. Exit code: %errorlevel%
             exit /b %errorlevel%
@@ -159,7 +159,7 @@ jobs:
           if %errorlevel% neq 0 (
             echo ::error::Python build (setup.py bdist_wheel) failed. Exit code: %errorlevel%
             exit /b %errorlevel%
-          }
+          )
           echo Build command finished successfully.
           "@
 
