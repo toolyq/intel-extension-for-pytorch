@@ -123,7 +123,7 @@ jobs:
             exit /b %errorlevel%
           }
           echo Build command finished successfully.
-
+          "@
 
           $TempBatchDir = "C:\temp"
           $TempBatchFile = Join-Path $TempBatchDir "build_script.bat"
