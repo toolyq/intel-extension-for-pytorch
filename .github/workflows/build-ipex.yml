@@ -25,18 +25,20 @@ jobs:
           echo "install_dir=$InstallDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           echo "oneapi_version_key=$OneApiVersionKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         shell: powershell
-
+        
       - name: Cache Intel oneAPI Installation
         id: cache-oneapi
         uses: actions/cache@v4
         with:
-          # Path to cache
           path: ${{ steps.oneapi_vars.outputs.install_dir }}
-          # Cache key: unique for OS, oneAPI version.
-          # If workflow file changes how oneAPI is installed, this key will change, busting the cache.
-          key: ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}-${{ hashFiles('**/workflow.yml') }}
+          # Key no longer includes workflow file hash.
+          # Cache will be reused as long as OS and oneapi_version_key are the same,
+          # regardless of changes to this workflow file (unless those changes alter the oneapi_version_key).
+          key: ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}
+          # Restore key is set to be very specific.
+          # Only an exact match for OS and oneapi_version_key will be restored.
           restore-keys: |
-            ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}-
+            ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}
 
       - name: Install Intel oneAPI Base Toolkit
         id: install_oneapi
@@ -44,46 +46,55 @@ jobs:
           $InstallerUrl = "${{ steps.oneapi_vars.outputs.installer_url }}"
           $InstallerPath = "C:\temp\oneapi_installer.exe"
           $InstallDir = "${{ steps.oneapi_vars.outputs.install_dir }}"
+          $SetvarsFile = Join-Path $InstallDir "setvars.bat"
 
-          # Check if already installed (e.g., from a restored cache)
-          # The actions/cache step runs before this. If it restored successfully, setvars.bat should exist.
-          if (Test-Path "$InstallDir\setvars.bat") {
-            echo "oneAPI seems to be already installed (found setvars.bat at $InstallDir). Assuming from cache."
-            echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            exit 0 # Important: Exit successfully if found, skipping download/install
+          # Check if cache was hit and setvars.bat exists
+          if ('${{ steps.cache-oneapi.outputs.cache-hit }}' == 'true') {
+            echo "Cache hit reported for oneAPI (key: ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }})."
+            if (Test-Path $SetvarsFile) {
+              echo "oneAPI found in cache (setvars.bat exists at $SetvarsFile)."
+              echo "setvars_path=$SetvarsFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              exit 0 # Exit successfully, skipping download/install
+            } else {
+              echo "::warning:: Cache hit reported, but $SetvarsFile not found at '$SetvarsFile' in the restored cache."
+              echo "This could indicate an incomplete or corrupted cache, or that the cached installation was different."
+              echo "Proceeding with a fresh installation to ensure correctness."
+            }
+          } else {
+            echo "Cache miss for oneAPI (key: ${{ runner.os }}-oneapi-${{ steps.oneapi_vars.outputs.oneapi_version_key }}). Proceeding with download and installation."
           }
 
-          echo "oneAPI not found or cache miss. Attempting to download and install Intel oneAPI Base Toolkit..."
+          echo "Attempting to download and install Intel oneAPI Base Toolkit..."
           $ProgressPreference = 'SilentlyContinue'
           New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
           echo "Downloading oneAPI Base Toolkit installer from $InstallerUrl..."
           try {
-            if ($InstallerUrl -eq "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") {
+            if ($InstallerUrl -match "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") { # More robust check
                 echo "::error::Installer URL is still the placeholder. Please update it in the workflow file."
                 exit 1
             }
             Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
             echo "Installer downloaded. Starting silent installation..."
 
-            # (Your existing --list-components logic can remain here if needed for debugging,
-            # but for caching, it's less critical if the install is skipped)
-
             $targetComponents = "intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.tbb.devel"
-            $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0 --install-dir=""$InstallDir""" # Ensure install-dir is used
+            $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0 --install-dir=""$InstallDir"""
             
             echo "Running installer with arguments: $oneApiArgs"
             Start-Process -FilePath $InstallerPath -ArgumentList $oneApiArgs -Wait -NoNewWindow
             
             if ($LASTEXITCODE -ne 0) {
               echo "::error::oneAPI installation failed with exit code $LASTEXITCODE."
-              # exit 1
-            }
-            echo "oneAPI installation finished successfully."
-            
-            if (Test-Path "$InstallDir\setvars.bat") {
-              echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              # exit 1 # Consider if you want to halt or allow further debugging steps
             } else {
-              echo "::error::setvars.bat not found at $InstallDir\setvars.bat after oneAPI installation."
+              echo "oneAPI installation finished successfully."
+            }
+            
+            if (Test-Path $SetvarsFile) {
+              echo "setvars_path=$SetvarsFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            } else {
+              echo "::error::setvars.bat not found at $SetvarsFile after oneAPI installation."
+              echo "Listing contents of $InstallDir to debug:"
+              Get-ChildItem -Path $InstallDir -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime
               exit 1
             }
           } catch {
