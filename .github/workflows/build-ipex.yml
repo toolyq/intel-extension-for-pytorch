@@ -155,7 +155,14 @@ jobs:
             exit /b %errorlevel%
           )
           echo Environment initialized. Starting Python build for IPEX...
-          python setup.py bdist_wheel -DUSE_NINJA=ON -DCMAKE_GENERATOR_PLATFORM=x64
+
+          set USE_NINJA=1
+          REM CMAKE_GENERATOR_PLATFORM=x64 通常由 setvars.bat intel64 vs2022 自动处理，或者不需要显式设置。
+          REM 如果遇到 CMake 找不到编译器或生成器的问题，可以尝试：
+          REM set CMAKE_ARGS="-DCMAKE_GENERATOR_PLATFORM=x64"
+          REM 但一般情况下，仅仅设置 USE_NINJA=1 就足够了。
+
+          python setup.py bdist_wheel
           if %errorlevel% neq 0 (
             echo ::error::Python build (setup.py bdist_wheel) failed. Exit code: %errorlevel%
             exit /b %errorlevel%
