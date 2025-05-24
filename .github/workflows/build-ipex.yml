@@ -111,7 +111,8 @@ jobs:
             # -p=NEED_VS2022_INTEGRATION=0 to skip VS integration with VS 2022 (GitHub runner default)
             # NOTE: The exact component IDs for DPC++ and MKL might need verification if the build fails later.
             #       You can get a list via: $InstallerPath -s -a --list-components
-            $oneApiArgs = "-s -a --silent --eula accept --components=intel.oneapi.win.dpcpp-compiler:intel.oneapi.win.mkl:intel.oneapi.win.tbb.devel -p=NEED_VS2022_INTEGRATION=0"
+            $targetComponents = "intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.tbb.devel"
+            $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0"
             
             echo "Running installer with arguments: $oneApiArgs"
             Start-Process -FilePath $InstallerPath -ArgumentList $oneApiArgs -Wait -NoNewWindow
