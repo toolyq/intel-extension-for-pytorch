@@ -12,16 +12,6 @@ jobs:
         shell: powershell # Using PowerShell for better scripting on Windows
 
     steps:
-      - name: Checkout IPEX Repository
-        uses: actions/checkout@v4
-        with:
-          repository: 'toolyq/intel-extension-for-pytorch' # Specify the IPEX repo
-          submodules: 'recursive' # Checkout submodules if any
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
 
       - name: Install Intel oneAPI Base Toolkit
         id: install_oneapi
@@ -51,14 +41,43 @@ jobs:
             Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
             echo "Installer downloaded. Starting silent installation..."
 
+            echo "----------------------------Listing components from installer:"
+            # Command to list components based on Intel's documentation
+            $listComponentsArgs = "-s -a --list-components"
+            echo "Running: $InstallerPath $listComponentsArgs"
+            
+            # Execute and capture output
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = $InstallerPath
+            $processInfo.Arguments = $listComponentsArgs
+            $processInfo.RedirectStandardOutput = $true
+            $processInfo.RedirectStandardError = $true
+            $processInfo.UseShellExecute = $false
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $processInfo
+            $process.Start() | Out-Null # Start the process
+            # Wait for the process to exit, and capture output.
+            # May need a timeout if the process hangs, but --list-components should be quick.
+            $process.WaitForExit() 
+            
+            $output = $process.StandardOutput.ReadToEnd()
+            $errorOutput = $process.StandardError.ReadToEnd()
+            
+            echo "--- Component List Output (Exit Code: $($process.ExitCode)) ---"
+            echo $output
+            if (-not [string]::IsNullOrWhiteSpace($errorOutput)) {
+              echo "--- Component List Error Output ---"
+              echo $errorOutput
+            }
+            echo "-------------------------------------"
+
             # Command based on Intel's documentation:
             # -s for the extractor, -a to pass args to installer
             # --silent for installer, --eula accept is required
             # --components: intel.oneapi.win.dpcpp-compiler (guess), intel.oneapi.win.mkl (guess), intel.oneapi.win.tbb.devel (from docs)
             # -p=NEED_VS2022_INTEGRATION=0 to skip VS integration with VS 2022 (GitHub runner default)
             # NOTE: The exact component IDs for DPC++ and MKL might need verification if the build fails later.
-            #       You can get a list via: 
-            $InstallerPath -s -a --list-components
+            #       You can get a list via:  $InstallerPath -s -a --list-components
             $targetComponents = "intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel:intel.oneapi.win.tbb.devel"
             $oneApiArgs = "-s -a --silent --eula accept --components=$targetComponents -p=NEED_VS2022_INTEGRATION=0"
             
@@ -87,6 +106,17 @@ jobs:
             exit 1
           }
         shell: powershell
+
+      - name: Checkout IPEX Repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'toolyq/intel-extension-for-pytorch' # Specify the IPEX repo
+          submodules: 'recursive' # Checkout submodules if any
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
       - name: Install Python Build Dependencies
         run: |
