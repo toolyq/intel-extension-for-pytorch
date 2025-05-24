@@ -1,0 +1,146 @@
+name: Build Intel Extension for PyTorch
+
+on:
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  build_windows:
+    runs-on: windows-latest # Using the latest Windows Server environment
+
+    defaults:
+      run:
+        shell: powershell # Using PowerShell for better scripting on Windows
+
+    steps:
+      - name: Checkout IPEX Repository
+        uses: actions/checkout@v4
+        with:
+          repository: 'intel/intel-extension-for-pytorch' # Specify the IPEX repo
+          submodules: 'recursive' # Checkout submodules if any
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Intel oneAPI Base Toolkit (Conceptual)
+        id: install_oneapi
+        run: |
+          echo "Attempting to download and install Intel oneAPI Base Toolkit..."
+          $ProgressPreference = 'SilentlyContinue' # For cleaner logs
+          # IMPORTANT: Replace this URL with the actual, stable download link for the oneAPI Base Toolkit offline installer
+          $InstallerUrl = "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE"
+          $InstallerPath = "C:\temp\oneapi_installer.exe"
+          $InstallDir = "C:\Program Files (x86)\Intel\oneAPI"
+
+          # Check if already installed
+          if (Test-Path "$InstallDir\setvars.bat") {
+            echo "oneAPI seems to be already installed. Skipping download/installation."
+            echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
+          echo "Downloading oneAPI Base Toolkit installer..."
+          try {
+            Invoke-WebRequest -Uri $InstallerUrl -OutFile $InstallerPath -UseBasicParsing
+            echo "Installer downloaded. Starting silent installation..."
+            # IMPORTANT: You MUST find the correct silent installation flags for the Intel oneAPI installer.
+            # The flags below are placeholders and may not work. Refer to Intel's documentation.
+
+            # THIS IS A CRITICAL PLACEHOLDER - REPLACE WITH CORRECT SILENT INSTALL COMMAND
+            Write-Error "Placeholder for oneAPI silent install. Update this step with correct command and arguments."
+            # Example (must be verified):
+            # & $InstallerPath accept --silent --eula=accept --installdir="\$InstallDir" --disable-vs-integration --components="intel.oneapi.lin.dpcpp_compiler_and_libraries"
+
+            # Simulate placeholder failure for now if URL not replaced
+            if ($InstallerUrl -eq "YOUR_ONEAPI_BASEKIT_OFFLINE_INSTALLER_URL_HERE") {
+                echo "::error::Installer URL not replaced. Halting."
+                exit 1
+            }
+            # Actual install command would go here, e.g.:
+            # Start-Process -FilePath $InstallerPath -ArgumentList "accept --silent --eula=accept --installdir=""$InstallDir"" --product=default" -Wait -NoNewWindow
+
+
+            if ($LASTEXITCODE -ne 0) {
+              echo "::error::oneAPI installation failed with exit code $LASTEXITCODE"
+              exit 1
+            }
+            echo "oneAPI installation finished."
+            if (Test-Path "$InstallDir\setvars.bat") {
+              echo "setvars_path=$InstallDir\setvars.bat" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            } else {
+              echo "::error::setvars.bat not found after oneAPI installation from $InstallDir. Searched for $InstallDir\setvars.bat"
+              exit 1
+            }
+          } catch {
+            echo "::error::Failed to download or install oneAPI: $($_.Exception.Message)"
+            exit 1
+          }
+        shell: powershell
+
+      - name: Install Python Build Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install wheel setuptools ninja psutil packaging
+          echo "Installing PyTorch 2.7.0 CPU version..."
+          pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Build Intel Extension for PyTorch
+        id: build_ipex
+        env:
+          PYTHONIOENCODING: "UTF-8"
+          PYTHONUTF8: "1"
+        run: |
+          $SetvarsPath = "${{ steps.install_oneapi.outputs.setvars_path }}"
+          if (-not $SetvarsPath -or !(Test-Path $SetvarsPath)) {
+            echo "::error::setvars.bat path ('$SetvarsPath') not found or not valid from previous step."
+            $DefaultSetvarsPath = "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+            echo "Trying default Intel oneAPI setvars.bat path: $DefaultSetvarsPath"
+            if (Test-Path $DefaultSetvarsPath) {
+              $SetvarsPath = $DefaultSetvarsPath
+            } else {
+              echo "::error::Default setvars.bat ('$DefaultSetvarsPath') also not found. Cannot proceed with build."
+              exit 1
+            }
+          }
+
+          echo "Using setvars.bat from: $SetvarsPath"
+
+          $ScriptContent = @"
+          @echo off
+          echo Calling "%SETVARS_PATH%" intel64 vs2022...
+          call "%SETVARS_PATH%" intel64 vs2022
+          if %errorlevel% neq 0 (
+            echo ::error::Failed to initialize oneAPI environment using setvars.bat. Exit code: %errorlevel%
+            exit /b %errorlevel%
+          )
+          echo Environment initialized. Starting Python build for IPEX...
+          python setup.py bdist_wheel -DUSE_NINJA=ON -DCMAKE_GENERATOR_PLATFORM=x64
+          if %errorlevel% neq 0 (
+            echo ::error::Python build (setup.py bdist_wheel) failed. Exit code: %errorlevel%
+            exit /b %errorlevel%
+          }
+          echo Build command finished successfully.
+"@
+
+          $TempBatchDir = "C:\temp"
+          $TempBatchFile = Join-Path $TempBatchDir "build_script.bat"
+          New-Item -ItemType Directory -Force -Path $TempBatchDir | Out-Null
+          Set-Content -Path $TempBatchFile -Value $ScriptContent -Encoding Ascii
+
+          echo "Executing temporary build script: $TempBatchFile"
+          cmd.exe /c "$TempBatchFile"
+
+          if ($LASTEXITCODE -ne 0) {
+            echo "::error::Build script execution failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+          echo "Build process completed via batch script."
+
+      - name: Upload Wheel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipex-wheel-windows-py310-torch27
+          path: dist/*.whl
+          if-no-files-found: error
